@@ -1,0 +1,22 @@
+{
+  "name": "reliable-ai-conversation-runtime-server",
+  "version": "1.0.0",
+  "description": "Bounded runtime for a single streamed conversational turn (Problem 5)",
+  "type": "commonjs",
+  "main": "src/api/server.js",
+  "scripts": {
+    "start": "node src/api/server.js",
+    "test": "jest --runInBand",
+    "bench": "node src/bench/benchmark.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node"
+  }
+}
