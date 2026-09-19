@@ -107,4 +107,8 @@ I used Claude (Anthropic) in this project: to design the component boundaries (P
 
 ## Credibility note
 
-At Prosent Pte. Ltd., I built the crosstab analysis and Excel export features for our survey and research analytics platform , a core part of how clients turn raw survey responses into reportable insights. My contribution included the drag-and-drop crosstab builder (rows/columns state management, drop-target handling) and the underlying
+At Prosent Pte. Ltd., I worked on several parts of our survey and research analytics platform, including building an intelligent assistant that could understand user queries and provide analytics based on the underlying survey data.
+
+I also worked on the crosstab analysis and Excel export features, including the drag-and-drop crosstab builder, rows and columns state management, and the related data and export workflows.
+
+Working on the intelligent assistant gave me practical experience with handling user queries, connecting them to the analytics system, and returning useful results. That experience was one of the reasons I was particularly interested in this challenge, and it also influenced how I approached the separation between the policy, provider, orchestration, persistence, and trace components in this implementation.
