@@ -1,146 +1,132 @@
-# Caygnus Product Engineering Challenge
 
-> **Before you begin:** Read this README and your selected problem brief completely before starting. If anything is unclear, contact us using whichever option you prefer: [hr@caygnus.com](mailto:hr@caygnus.com) or [Omkar Sonawane on LinkedIn](https://www.linkedin.com/in/omkar-sonawane-ss/).
+# Reliable AI Conversation Runtime
 
-We are hiring a **Product Engineer / Full-Stack Developer** to build and ship products in the AI space at Caygnus. The role is available in a **remote or hybrid** working arrangement.
+Name: Malyavantham Sai Harshavardhan
+Email: msvharsha16@gmail.com
+Phone: +91 9515963308
+Problem statement: Problem 5 — Reliable AI Conversation Runtime
+Tech stack: Node.js + Express (backend), React + Vite (frontend), Jest (tests), plain SSE for query streaming.
 
-We care less about years of experience than evidence: what you have shipped, the complexity or scale you have handled, and how you make engineering and product decisions.
 
-## The product context
+A small runtime that manages one streamed AI reply from request to a
+final outcome, success, rejection, cancellation, timeout, or failure —
+and guarantees that only a real success ever gets persisted as one.
 
-Imagine a persistent conversational companion that remembers useful context, continues conversations across devices, follows up at the right time, and remains dependable when networks, processes, or model providers fail.
+## Why this exists
 
-Building that experience involves more than calling a language model. It requires thoughtful client state, realtime protocols, durable workflows, trustworthy memory, and a reliable AI runtime.
+Streaming a model's reply sounds simple until you ask: what happens if
+the user cancels halfway through? What if the model takes too long? What
+if it errors out after already sending half an answer? If you're not
+careful, a broken reply can end up looking identical to a real one in
+your database. This project is built specifically so that can't happen
+every outcome is tracked through an explicit state machine, and only one
+terminal state can ever win.
 
-Choose **one** of the following focused problems. You are not expected to build the complete companion.
+## Layout
 
-| Problem | Primary signal | Detailed brief |
-| --- | --- | --- |
-| Resumable realtime conversation | Streaming, reconnection, ordering, durable event history, and frontend state | [View problem 1](problems/01-resumable-realtime-conversation/README.md) |
-| Offline-capable mobile conversation | Mobile state, local persistence, synchronization, and idempotency | [View problem 2](problems/02-offline-mobile-conversation/README.md) |
-| Durable reminders and follow-ups | Scheduling, workflow durability, retries, time zones, and cancellation | [View problem 3](problems/03-durable-reminders/README.md) |
-| Trustworthy long-term memory | Data modelling, provenance, retrieval, correction, and user control | [View problem 4](problems/04-trustworthy-memory/README.md) |
-| Reliable AI conversation runtime | Orchestration, streaming, safety gates, cancellation, and observability | [View problem 5](problems/05-reliable-conversation-runtime/README.md) |
+```
+server/src/core/
+  StateMachine.js    the state machine itself, plus the race-safety guard
+  Trace.js           records what happened, in order, with secrets stripped
+  Policy.js          decides whether to even try generating a reply
+  FakeProvider.js    a scriptable stand-in for a real model, used in tests
+  OpenAIProvider.js  the real thing, same interface as the fake one
+  Store.js           what gets saved and when
+  Orchestrator.js    wires all of the above into one turn
 
-Read this page first, then read the complete brief for your selected problem. The problem-specific brief is the source of truth for its acceptance criteria.
+server/src/api/      Express app — streams replies over SSE
+server/src/bench/    the verification benchmark (npm run bench)
+server/src/__tests__/ one test block per acceptance criterion
 
-## What this challenge is—and is not
+client/              React chat UI with a live trace panel
+```
 
-This is a focused credibility exercise, not a request for a production-ready product or unpaid product work. We want to understand how you:
+## Running it
 
-- Identify the important part of a problem
-- Structure software into clear responsibilities
-- Choose appropriate data structures and interfaces
-- Handle realistic failure and recovery cases
-- Write maintainable, idiomatic code
-- Test important behaviour
-- Explain decisions, trade-offs, and deliberately omitted scope
+```bash
+cd server && npm install
+npm test         # ~1 second, all deterministic
+npm run bench     # runs 50 scenarios, checks nothing broke, --- Bench mark
+npm start          # http://localhost:4000
+```
 
-We do **not** expect authentication, production infrastructure, elaborate visual design, or a long feature list. Extra scope does not compensate for an unreliable core implementation.
+```bash
+cd client && npm install
+npm run dev          # http://localhost:5173
+```
 
-## Time and technology
+Send a normal message to see it stream. Send something containing
+`blocked_test_input` to see it get rejected before the model is ever
+called. Hit Cancel mid-reply, or set the timeout low, to see the other
+two ways a turn can end.
 
-- Submit your solution within **3–4 calendar days** of receiving the challenge.
-- We recommend spending approximately **6–8 hours** of active work. You are not expected to spend the entire submission window building.
-- You may use **any appropriate language, framework, database, infrastructure, or model provider**.
-- For the mobile problem, produce a runnable mobile experience using React Native, Flutter, or a native platform.
-- Explain why you selected your stack and its important trade-offs.
-- An incomplete but well-reasoned submission is better than a large, overbuilt submission.
+### Using the real OpenAI API
 
-If a requirement is unclear, make a reasonable assumption, document it, and continue. We evaluate the quality of your decision—not whether you guessed an unstated preference.
+By default this runs on a fake, scripted provider — no API key needed.
+If you want real replies:
 
-## How to complete the challenge
+```bash
+cd server
+cp .env.example .env
+# put your key in: OPENAI_API_KEY=sk-...
+npm start
+```
 
-1. Fork this repository.
-2. Choose one problem from the table above.
-3. Build your solution in your fork using any structure appropriate for your stack.
-4. Copy [SUBMISSION_TEMPLATE.md](SUBMISSION_TEMPLATE.md) to `SUBMISSION.md` and complete every section.
-5. Add focused automated tests.
-6. Run the problem-specific verification benchmark.
-7. Record the required demo video.
-8. Verify that setup instructions and video permissions work for someone outside your account.
-9. Submit the link to your fork.
+The server logs which one it's using on boot. Tests and the benchmark
+always use the fake provider regardless — that's on purpose, so they stay
+free, fast, and don't depend on OpenAI being up.
 
-Do not modify the problem statement to make your implementation appear compliant. If you intentionally interpret a requirement differently, explain the interpretation in `SUBMISSION.md`.
+## How it actually works
 
-## Required submission evidence
+**Policy runs first.** Before anything touches the model, a plain
+function decides whether the input is even allowed. If it says no, the
+provider is never invoked — full stop.
 
-A submission is complete only when it contains all of the following.
+**One state machine owns the outcome.** A turn moves through
+`pending → policy_check → streaming → (completed | rejected | cancelled |
+timed_out | failed)`. Only one thing is allowed to change that state —
+the Orchestrator — and the actual transition is a plain, synchronous
+function with no `await` inside it. That last detail matters: Node runs
+JavaScript on one thread, so a synchronous check-then-write can't get
+interrupted halfway through. If two things both try to end the turn at
+almost the same moment (say, the model finishes right as the timeout
+fires), whichever one gets there first wins, and the second is silently
+rejected — not silently accepted. That's what makes "exactly one terminal
+outcome" a real guarantee instead of a hope.
 
-### 1. Runnable source code
+**Cancellation and timeout share one mechanism.** Both use a standard
+`AbortController`. Both lock in the state transition *before* firing the
+abort — so by the time the model's stream actually throws, the outcome is
+already decided, and cleanup just persists whatever partial text had
+streamed in.
 
-The reviewer must be able to run the selected acceptance scenarios. Never commit API keys, credentials, access tokens, private datasets, or other secrets.
+**What gets saved, and when.** The user's message is always saved,
+immediately. The model's reply is only saved as a real message if the
+turn reaches `completed`. If it's cancelled, times out, or fails, whatever
+text had streamed in is kept on the turn's own record (useful for
+debugging) but never shows up in the conversation , a half-finished reply
+should never look like a real one.
 
-### 2. Completed `SUBMISSION.md`
+**The trace tells you what happened, not what the model was thinking.**
+Every turn keeps an ordered log , turn created, policy checked, provider
+called, chunk received, error, terminal outcome. It never contains the
+model's actual output content or hidden reasoning, and any field that
+looks like a secret (`apiKey`, `token`, `password`, etc.) gets stripped
+before it's ever stored, at any nesting depth. Once a turn reaches its
+terminal state, the trace refuses to accept anything after it.
 
-Use the provided [submission template](SUBMISSION_TEMPLATE.md). It asks for setup and test instructions, architecture, technology choices, completed acceptance scenarios, benchmark evidence, assumptions, limitations, AI usage, and a credibility note.
+**Same runtime works behind anything.** The Orchestrator doesn't know
+about HTTP — it just takes input and gives back a result, plus an
+optional callback for streaming. The Express/SSE layer is a thin adapter
+on top. Swap it for WebSockets or a mobile client and nothing about the
+state machine, persistence, or trace has to change.
 
-Aim for setup instructions that a reviewer can follow within approximately 10 minutes.
+## If users could resume a cancelled reply
 
-### 3. Focused tests
-
-At minimum, include one important successful path, one relevant failure or recovery path, and any deterministic tests required by the selected problem brief.
-
-We value meaningful tests over a high coverage percentage. Tests must not depend on paid external services.
-
-### 4. Demo video
-
-Attach a **3–5 minute demo video** using Loom, YouTube, Google Drive, or another accessible service. Put the link near the top of `SUBMISSION.md`.
-
-The video must show the project running, the required successful scenario, at least one failure or recovery scenario, the problem-specific benchmark, a brief architecture explanation, and one important trade-off.
-
-A straightforward screen recording with narration is sufficient. Production-quality editing is not expected. A submission without an accessible demo video is incomplete.
-
-### 5. Credibility note
-
-Briefly describe one product or system you previously helped ship:
-
-- What problem it solved
-- Your personal contribution
-- The scale or operational complexity involved
-- One difficult engineering or product decision you made
-- A public link, repository, case study, or other evidence when available
-
-You may anonymize confidential details and use approximate figures. Scale can be demonstrated through users, traffic, concurrency, data volume, latency, reliability, cost, deployment complexity, or operational responsibility.
-
-## Using AI tools
-
-You may use AI tools while completing this challenge. AI usage will not reduce your score.
-
-Disclose which tools you used, what they helped with, and how you reviewed their output. You remain responsible for everything in your submission. We are not evaluating how much code you typed manually; we are evaluating the software you chose to submit and your understanding of it.
-
-During review, we will consider decomposition, component boundaries, data structures, state transitions, coding patterns, maintainability, failure recovery, useful abstractions, and meaningful tests. You should be able to explain any part of the submission. In a follow-up discussion, we may ask you to make or describe a small change.
-
-## How we evaluate submissions
-
-Reviewers use the same public [review scorecard](REVIEW_SCORECARD.md) for every technology stack and problem choice.
-
-| Area | Weight | What we look for |
-| --- | ---: | --- |
-| Core correctness | 25% | The selected acceptance scenarios and verification benchmark work consistently. |
-| Software architecture and decomposition | 25% | Responsibilities, boundaries, interfaces, state ownership, and data flow are clear. |
-| Coding patterns and maintainability | 20% | The code is readable, consistent, idiomatic, and no more complicated than necessary. |
-| Failure handling | 15% | Important failures are identified, observable, bounded, and recoverable. |
-| Testing | 10% | Tests focus on valuable success, failure, and recovery behaviour. |
-| Communication and trade-offs | 5% | Decisions, assumptions, limitations, and alternatives are explained clearly. |
-
-We do not award additional points for visual polish, deployment, fashionable technology choices, raw code volume, or unrelated features unless they materially improve the selected capability.
-
-## Reasons a submission may be incomplete
-
-- The repository or demo video is inaccessible.
-- Setup instructions are absent or cannot reasonably be followed.
-- The selected problem is not identified.
-- The core acceptance scenario or required benchmark is not demonstrated.
-- Secrets or private credentials are committed.
-- Large portions of submitted code cannot be explained by the candidate.
-
-An incomplete optional feature is not a reason for rejection. Clearly label unfinished work and prioritize the required behaviour.
-
-## How to apply
-
-Submit your repository through [the submission form](https://binary.so/u2QOfUx), or email it to [caygnus@gmail.com](mailto:caygnus@gmail.com).
-
-Include your resume and links to products or projects you have worked on or shipped.
-
-We look forward to seeing how you think and build.
+Right now a cancelled turn's partial text is kept but never becomes part
+of the conversation. To support "resume from where it left off," I'd add
+a `parentTurnId` so a new turn can say "I'm a continuation of that one,"
+seed the new turn's generation with the old partial text, and only commit
+a message to the conversation once *that* new turn completes — merging
+the partial and the continuation into one. The core rule stays intact:
+nothing but a genuinely completed turn ever becomes a real message.
